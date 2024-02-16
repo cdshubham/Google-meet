@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peers</title>
+    <style>
+        *{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* chatting */
+        .box{
+            position: absolute;
+            top:50%;
+            right: 0;
+            height: 70vh;
+            width: 20vw;
+            background-color: antiquewhite;
+            overflow-y: auto;
+        }
+        #msg{
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 90%;
+            height: 20px;
+        }
+        #send{
+            position: absolute;
+            bottom: 0;
+            width: 9%;
+            right: 0;
+            height: 23px;
+        }
+        .rightmsg{
+            padding:10px;
+            background-color: red;
+        }
+        .leftmsg{
+            padding:10px;
+            background-color:blue;
+        }
+
+
+        /* video */
+
+        #videoElement{
+            display: none;
+        }
+
+        #remoteVideo{
+            display: none;
+        }
+        
+        .right{
+            position: absolute;
+            right:0;
+        }
+
+        #screenShare{
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- video -->
+    <div class="block">
+        <input type="text" id="text" placeholder="Enter Room No">
+        <input type="text" id="name" placeholder="Enter Your Name">
+        <button id="join">Join</button>
+        <button id="create">Create</button>
+    </div>
+    
+    <div id="videoContainerCreate">
+        <video id="videoElement"></video>
+        <div id="nameOverlay" style="background-color: rgba(0, 0, 0, 0.5);"></div>
+    </div>
+
+    <div id="videoContainerJoin">
+        <video id="remoteVideo"></video>
+        <div id="nameOverlay" style="background-color: rgba(0, 0, 0, 0.5);"></div>
+    </div>
+    
+    <button onclick="startScreenShare()" id="screenShare">Screen Share</button>
+
+    <!-- chatting -->
+    <div class="box">
+        <input type="text" id="msg">
+        <button id="send">Send</button>
+    </div>   
+     
+    <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js" integrity="sha512-zoJXRvW2gC8Z0Xo3lBbao5+AS3g6YWr5ztKqaicua11xHo+AvE1b0lT9ODgrHTmNUxeCw0Ry4BGRYZfXu70weg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script>
+        //HTML element
+        let join=document.querySelector('#join');
+        let create=document.querySelector('#create');
+        let queryBlock=document.querySelector('.block');
+        let text=document.querySelector('#text');
+        let nameEntry=document.querySelector('#name');
+        let screen=document.querySelector('#screenShare');
+        let videoContainer=document.querySelector('#videoContainerCreate');
+        let videoContainerJoin=document.querySelector('#videoContainerJoin');
+        const msg = document.getElementById('msg');
+        const send = document.getElementById('send');
+        
+        
+        //Global Variables
+        let myStream=null;
+        let room='89';
+        let peer;
+        let screenStream;
+        let currentPeer = null
+        let screenSharing = false
+        let name;
+        let remoteName;
+        
+        document.addEventListener('DOMContentLoaded', function () {
+            const socket = io();
+
+            if (socket) {
+                socket.on('connect',()=>{
+                    socket.emit('passName',remoteName);
+                    console.log(socket.id);
+                });
+
+                send.addEventListener('click', () => {
+                    if (msg.value !== '') {
+                        socket.emit('send', msg.value,room,name);
+                        giveMsg(msg.value);
+                    }
+                });
+                  
+                socket.on('recieve',(msg,name)=>{
+                    recieveMsg(msg,name);
+                });    
+                
+                //Event Listeners
+                join.addEventListener('click',function () {
+                    if(nameEntry.value!='' && text.value!=''){
+                        name=nameEntry.value;
+                        socket.emit('newUser',nameEntry.value);
+                        joinRoom();
+                    }
+                    else{
+                        alert('Please enter details');
+                    }
+                })
+                create.addEventListener('click',function () {
+                    if(nameEntry.value!='' && text.value!=''){
+                        name=nameEntry.value;
+                        socket.emit('newUser',nameEntry.value);
+                        createRoom();
+                    }
+                    else{
+                        alert('Please enter details');
+                    }
+                })
+            
+                function giveMsg(msg){
+                    const newDiv = document.createElement('div');
+                    newDiv.textContent = `You:${msg}`;
+                    newDiv.classList.add('rightmsg');
+                    const container = document.querySelector('.box');
+                    container.appendChild(newDiv);
+                }    
+
+                function recieveMsg(msg,name){
+                    console.log('Final:',name);
+                    remoteName=name;
+                    const newDiv = document.createElement('div');
+                    newDiv.textContent = `${name}:${msg}`;
+                    newDiv.classList.add('leftmsg');
+                    const container = document.querySelector('.box');
+                    container.appendChild(newDiv);
+                }    
+
+
+
+                /**
+                 * Handler Functions
+                 */
+                function createRoom() {
+                    room=text.value;
+                    if (room == "") {
+                        alert("Give some name to the Room");
+                        return;
+                    }
+                    socket.emit('join-room',room);
+                    let peer=new Peer(room);
+                    console.log(peer);
+                    peer.on('open',(res)=>{
+                        alert(`Room ID=${res}`);
+                        setCameraCreate();
+                        peer.on('call',(call)=>{
+                            call.answer(myStream);
+                            call.on('stream',(stream)=>{
+                                dusrekaStream(stream);
+                            })
+                            currentPeer=call;
+                        })
+                    })
+                }
+
+
+                function joinRoom() {
+                    room=text.value;
+                    if (room == "") {
+                        alert("Give some name to the Room");
+                        return;
+                    }
+                    socket.emit('join-room',room);
+                    peer=new Peer();
+                    peer.on('open',(res)=>{
+                        setCameraJoin();
+                    })
+                }
+
+
+                function setCameraCreate() {
+                    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+                        .then(function (stream) {
+                            myStream = stream;
+                            let videoElement = document.getElementById('videoElement');
+                            let nameOverlay = document.getElementById('nameOverlay');
+
+                            queryBlock.style.display = 'none';
+                            videoElement.srcObject = stream;
+                            videoContainer.style.display = 'inline-block';
+                            videoContainer.style.width = '300px';
+                            videoContainer.style.height = '300px';
+
+                            videoElement.style.display = 'inline-block';
+                            videoElement.style.height = '300px';
+                            videoElement.style.width = '300px';
+                            nameOverlay.innerText='You';
+                            videoElement.play();
+
+                            // After setting up the camera, check if screen sharing is active and replace the track
+                            if (screenSharing && currentPeer) {
+                                startScreenShare();
+                            }
+                        })
+                        .catch(function (error) {
+                            console.error('Error accessing media devices:', error);
+                        });
+                }
+
+
+                function setCameraJoin() {
+                    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+                        .then(function (stream) {
+                            myStream=stream;
+                            let videoElement = document.getElementById('videoElement');
+                            queryBlock.style.display='none';
+                            
+                            videoElement.srcObject = stream;
+
+                            videoContainer.style.display = 'inline-block';
+                            videoContainer.style.width = '300px';
+                            videoContainer.style.height = '300px';
+                            videoContainer.style.position='absolute';           
+
+                            videoElement.style.display='inline-block';
+
+                            videoElement.style.height='500px';      
+                            videoElement.style.width='500px';
+                            nameOverlay.innerText=remoteName;
+                            console.log(name,'name');
+                            videoElement.play();
+                            let call=peer.call(room,stream);
+                            call.on('stream',(stream)=>{
+                                dusrekaStream(stream)
+                            })
+                            currentPeer=call;
+                        })
+                        .catch(function (error) {
+                            console.error('Error accessing media devices:', error);
+                        });
+                }
+
+
+                function dusrekaStream(stream) {
+                    let remoteVideo = document.getElementById('remoteVideo');
+                    remoteVideo.srcObject = stream;
+                    remoteVideo.style.display = 'inline-block';
+                    remoteVideo.style.height = '200px';
+                    remoteVideo.style.width = '200px';
+                    remoteVideo.style.top = '0px';
+
+                    remoteVideo.style.position = 'absolute';
+                    remoteVideo.style.right = '0';
+
+                    // Wait for the stream to load metadata
+                    remoteVideo.onloadedmetadata = (e) => {
+                        remoteVideo.play();
+                    };
+                }
+
+
+                function startScreenShare() {
+                    if (screenSharing) {
+                        stopScreenSharing()
+                    }
+                    navigator.mediaDevices.getDisplayMedia({ video: true }).then((stream) => {
+                        screenStream = stream;
+                        let videoTrack = screenStream.getVideoTracks()[0];
+                        videoTrack.onended = () => {
+                            stopScreenSharing()
+                        }
+                        if (peer) {
+                            let sender = currentPeer.peerConnection.getSenders().find(function (s) {
+                                return s.track.kind == videoTrack.kind;
+                            })
+                            sender.replaceTrack(videoTrack)
+                            screenSharing = true
+                        }
+                        console.log(screenStream)
+                    })
+                }
+
+                function stopScreenSharing() {
+                    if (!screenSharing) return;
+                    let videoTrack = myStream.getVideoTracks()[0];
+                    if (peer) {
+                        let sender = currentPeer.peerConnection.getSenders().find(function (s) {
+                            return s.track.kind == videoTrack.kind;
+                        })
+                        sender.replaceTrack(videoTrack)
+                    }
+                    screenStream.getTracks().forEach(function (track) {
+                        track.stop();
+                    });
+                    screenSharing = false
+                }
+
+                    } else {
+                        console.error('Socket is undefined. Make sure Socket.IO is loaded and the server is running.');
+                    }    
+                });    
+
+
+        
+    </script>
+</body>
+</html>
